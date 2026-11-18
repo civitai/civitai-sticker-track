@@ -210,6 +210,50 @@ class _HeadEmbedder:
         return e
 
 
+def _eye_lines(sam3, eyes_cond, images, poses, tgt, view, fps, size=504):
+    """Eye-line angle on frames sampled twice a second, from SAM 3.1 eye masks in a crop around the sticker."""
+    from comfy_extras.nodes_sam3 import SAM3_Detect
+
+    n, H, W = images.shape[:3]
+    step = max(1, int(round(fps / 2)))
+    starts = {t for t in range(1, n) if poses[t] is not None and poses[t - 1] is None}
+    frames, crops = [], []
+    for t in sorted(set(range(step, n, step)) | starts):
+        p = poses[t]
+        if p is None or tgt[t] is None:
+            continue
+        side = int(min(max(2.4 * p.w, 96), H, W))
+        x0 = int(min(max(p.cx - side / 2, 0), W - side))
+        y0 = int(min(max(p.cy - side / 2, 0), H - side))
+        crop = images[t:t + 1, y0:y0 + side, x0:x0 + side, :3].movedim(-1, 1)
+        crops.append(F.interpolate(crop, size=(size, size), mode="bilinear", align_corners=False).movedim(1, -1))
+        frames.append((t, x0, y0, side / size))
+    lines = {}
+    if not crops:
+        return lines
+    masks, boxes = [], []
+    for c in range(0, len(crops), 32):
+        m, bb = SAM3_Detect.execute(model=sam3, image=torch.cat(crops[c:c + 32]), conditioning=eyes_cond,
+                                    threshold=0.25, refine_iterations=0, individual_masks=True).result
+        masks.append(m)
+        boxes += bb
+    masks = torch.cat(masks)
+    at = 0
+    for (t, x0, y0, s), found in zip(frames, boxes):
+        eyes = []
+        for m in masks[at:at + len(found)]:
+            ys, xs = torch.nonzero(m > 0.5, as_tuple=True)
+            if len(xs) >= 6:
+                eyes.append((x0 + s * float(xs.float().mean()), y0 + s * float(ys.float().mean()), s * s * float(len(xs))))
+        at += len(found)
+        if eyes:
+            inside = view.contains(t, tgt[t], np.array([e[:2] for e in eyes], np.float32))
+            a = tracking.eye_line([e for e, ok in zip(eyes, inside) if ok], poses[t])
+            if a is not None:
+                lines[t] = a
+    return lines
+
+
 class StickerTrack:
     """SAM3 head track + TAPNext++ points on the head -> per-frame sticker pose, as the app's v1 track JSON."""
 
@@ -229,6 +273,8 @@ class StickerTrack:
                                         "tooltip": "Mean grey difference (0-255, at 64x48) that starts a new shot."}),
             "reid_threshold": ("FLOAT", {"default": 0.4, "min": -1.0, "max": 1.0, "step": 0.01,
                                          "tooltip": "Cosine similarity to the frame-0 head a head needs to take over after a cut."}),
+        }, "optional": {
+            "eyes": ("CONDITIONING", {"tooltip": "SAM3 text conditioning for eyes (\"eye:4\"). Glasses then turn with the eye line, not the head's nod."}),
         }}
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -236,7 +282,7 @@ class StickerTrack:
     FUNCTION = "track"
     CATEGORY = "civitai/sticker"
 
-    def track(self, images, track_data, sam3, tapnext, placement, fps, tick_ms, points_per_side, cut_threshold, reid_threshold):
+    def track(self, images, track_data, sam3, tapnext, placement, fps, tick_ms, points_per_side, cut_threshold, reid_threshold, eyes=None):
         from comfy.ldm.sam3.tracker import unpack_masks
 
         t_start = time.perf_counter()
@@ -274,13 +320,20 @@ class StickerTrack:
             poses, boundaries, stats = tracking.solve(n, H, W, fps, view, tgt, cuts, p, tracker, points_per_side)
         finally:
             model.to(mm.unet_offload_device())
+        t_eyes = time.perf_counter()
+        lines = {}
+        if eyes is not None:
+            lines = _eye_lines(sam3, eyes, images, poses, tgt, view, fps)
+            poses = tracking.snap_rotation(poses, boundaries, lines)
+        t_eyes = time.perf_counter() - t_eyes
         smoothed = tracking.smooth(poses, boundaries, fps)
         track = tracking.encode_v1(smoothed, H, W, fps, tick_ms)
 
         stats.update({
             "objects": k,
             "reid": reid_log,
-            "seconds": {"prep": round(t_prep - t_start, 3), "points": round(tracker.seconds, 3),
+            "eye_lines": len(lines),
+            "seconds": {"prep": round(t_prep - t_start, 3), "points": round(tracker.seconds, 3), "eyes": round(t_eyes, 3),
                         "total": round(time.perf_counter() - t_start, 3)},
         })
         return (json.dumps(track, separators=(",", ":")), json.dumps(stats))

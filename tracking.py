@@ -412,3 +412,60 @@ def sample_v1(track, time_ms):
         "scale": _sample_channel(track["s"], tick, False),
         "rotation": _sample_channel(track["r"], tick, True),
     }
+
+
+def eye_line(eyes, pose):
+    """Angle of the line through the two biggest eye masks under the sticker, or None.
+
+    `eyes` are (cx, cy, area) in image pixels.
+    """
+    th = math.radians(pose.r)
+    near = []
+    for cx, cy, area in eyes:
+        dx, dy = cx - pose.cx, cy - pose.cy
+        if abs(dx * math.cos(th) + dy * math.sin(th)) <= 0.8 * pose.w and abs(dy * math.cos(th) - dx * math.sin(th)) <= 0.5 * pose.w:
+            near.append((cx, cy, area))
+    if len(near) < 2:
+        return None
+    e1 = max(near, key=lambda e: e[2])
+    others = [e for e in near if 0.2 * pose.w <= math.hypot(e[0] - e1[0], e[1] - e1[1]) <= 1.3 * pose.w]
+    if not others:
+        return None
+    e2 = max(others, key=lambda e: e[2])
+    a = pose.r + wrap_deg(math.degrees(math.atan2(e2[1] - e1[1], e2[0] - e1[0])) - pose.r)
+    if abs(a - pose.r) > 90:
+        a -= math.copysign(180.0, a - pose.r)
+    return a if abs(a - pose.r) <= 45 else None
+
+
+def snap_rotation(poses, boundaries, lines):
+    """Turn the sticker with the eye line wherever SAM 3.1 sees both eyes under it.
+
+    Points read a nod seen side-on as roll; the eye line does not. The difference between the two
+    is interpolated between samples, so the points still carry fast motion. Frame 0 keeps the
+    user's rotation.
+    """
+    n = len(poses)
+    out = list(poses)
+    cut = set(boundaries)
+    i = 0
+    while i < n:
+        if poses[i] is None:
+            i += 1
+            continue
+        j = i + 1
+        while j < n and poses[j] is not None and j not in cut:
+            j += 1
+        ts = [t for t in range(max(i, 1), j) if lines.get(t) is not None]
+        a = [lines[t] for t in ts]
+        ts = [t for m, t in enumerate(ts) if abs(a[m] - np.median(a[max(0, m - 2):m + 3])) <= 8]
+        cs = [wrap_deg(lines[t] - poses[t].r) for t in ts]
+        if i == 0:
+            ts, cs = [0] + ts, [0.0] + cs
+        if cs:
+            corr = np.interp(np.arange(i, j), ts, cs)
+            for t in range(i, j):
+                p = poses[t]
+                out[t] = Pose(p.cx, p.cy, p.w, p.r + float(corr[t - i]))
+        i = j
+    return out

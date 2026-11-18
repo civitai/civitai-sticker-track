@@ -6,7 +6,7 @@ How it works:
 
 1. Core `SAM3_Detect` finds the heads on frame 0 (the prompt is `head:16`: a bare `head` returns only the best-scoring one); `StickerAnchorPick` keeps the one under the sticker and fails rather than take a head far from it.
 2. Core `SAM3_VideoTrack` (SAM 3.1) follows that head through the clip.
-3. `StickerTrack` seeds TAPNext++ points on the head around the sticker and fits an affine transform from the seed frame on every frame. Rotation is read off the sticker's own axis, so a head turn is not taken for a tilt. Cuts are confirmed against the points. SAM 3.1 keeps the character's identity across cuts; a head that ever shares a frame with it is never taken for it, and the sticker hides while the character is off screen or its centre is outside the frame. Each shot is smoothed, then resampled to fixed ticks.
+3. `StickerTrack` seeds TAPNext++ points on the head around the sticker and fits an affine transform from the seed frame on every frame. Where SAM 3.1 sees both eyes under the sticker (prompt `eye:4`, sampled twice a second), the sticker turns with the eye line, because the points read a nod seen side-on as a tilt; elsewhere the rotation comes from the points. Cuts are confirmed against the points. SAM 3.1 keeps the character's identity across cuts; a head that ever shares a frame with it is never taken for it, and the sticker hides while the character is off screen or its centre is outside the frame. Each shot is smoothed, then resampled to fixed ticks.
 4. Core `SaveText` (format `json`) writes the track.
 
 ## Nodes
@@ -16,7 +16,7 @@ How it works:
 | `StickerLoadVideo` | video path, `fps`, `max_side` | frames on an fps grid, `fps` |
 | `StickerAnchorPick` | per-instance `MASK` of frame 0, `placement` | `initial_mask` for `SAM3_VideoTrack` |
 | `TAPNextLoader` | TAPNext++ checkpoint, `resolution` (256 or 512) | `TAPNEXT` |
-| `StickerTrack` | frames, `SAM3_TRACK_DATA`, SAM 3.1 `MODEL`, `TAPNEXT`, `placement`, `fps`, `tick_ms` | `track_json`, `stats_json` |
+| `StickerTrack` | frames, `SAM3_TRACK_DATA`, SAM 3.1 `MODEL`, `TAPNEXT`, `placement`, `fps`, `tick_ms`, optional eye `CONDITIONING` | `track_json`, `stats_json` |
 | `StickerTrackPreview` | frames, `track_json`, sticker image and mask | frames with the sticker drawn on |
 
 `placement` is the sticker on frame 0: `{"x": 0.42, "y": 0.41, "scale": 0.3, "rotation": -11}`. `x`/`y` are the sticker centre as fractions of the frame width/height, `scale` is the sticker width as a fraction of the frame width, `rotation` is in degrees, clockwise.
