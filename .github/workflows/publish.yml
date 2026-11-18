@@ -1,0 +1,14 @@
+name: Publish to Comfy Registry
+on:
+  workflow_dispatch:
+permissions:
+  issues: write
+jobs:
+  publish-node:
+    if: ${{ github.repository_owner == 'rmatif' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Comfy-Org/publish-node-action@v1
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}

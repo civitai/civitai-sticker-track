@@ -1,0 +1,3 @@
+einops
+scipy
+opencv-python-headless

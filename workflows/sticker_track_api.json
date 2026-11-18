@@ -1,0 +1,140 @@
+{
+  "1": {
+    "class_type": "VHS_LoadVideoPath",
+    "inputs": {
+      "video": "VIDEO_AIR",
+      "force_rate": 8,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1
+    }
+  },
+  "2": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "urn:air:other:checkpoint:huggingface:Comfy-Org/sam3.1@7bb8374780a725b4353ed31f3a9395c9742b5621/checkpoints/sam3.1_multiplex_fp16.safetensors"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "head",
+      "clip": [
+        "2",
+        1
+      ]
+    }
+  },
+  "4": {
+    "class_type": "ImageFromBatch",
+    "inputs": {
+      "image": [
+        "1",
+        0
+      ],
+      "batch_index": 0,
+      "length": 1
+    }
+  },
+  "5": {
+    "class_type": "SAM3_Detect",
+    "inputs": {
+      "model": [
+        "2",
+        0
+      ],
+      "image": [
+        "4",
+        0
+      ],
+      "conditioning": [
+        "3",
+        0
+      ],
+      "threshold": 0.4,
+      "refine_iterations": 2,
+      "individual_masks": true
+    }
+  },
+  "6": {
+    "class_type": "StickerAnchorPick",
+    "inputs": {
+      "masks": [
+        "5",
+        0
+      ],
+      "placement": "{\"x\": 0.5, \"y\": 0.4, \"scale\": 0.2, \"rotation\": 0}"
+    }
+  },
+  "7": {
+    "class_type": "SAM3_VideoTrack",
+    "inputs": {
+      "images": [
+        "1",
+        0
+      ],
+      "model": [
+        "2",
+        0
+      ],
+      "initial_mask": [
+        "6",
+        0
+      ],
+      "conditioning": [
+        "3",
+        0
+      ],
+      "detection_threshold": 0.5,
+      "max_objects": 8,
+      "detect_interval": 2
+    }
+  },
+  "8": {
+    "class_type": "TAPNextLoader",
+    "inputs": {
+      "ckpt_name": "urn:air:other:checkpoint:huggingface:google/tapnet@5d3fb48e76c5422841e38501514121e251beabb7/tapnextpp_ckpt.pt",
+      "resolution": 256
+    }
+  },
+  "9": {
+    "class_type": "StickerTrack",
+    "inputs": {
+      "images": [
+        "1",
+        0
+      ],
+      "track_data": [
+        "7",
+        0
+      ],
+      "sam3": [
+        "2",
+        0
+      ],
+      "tapnext": [
+        "8",
+        0
+      ],
+      "placement": "{\"x\": 0.5, \"y\": 0.4, \"scale\": 0.2, \"rotation\": 0}",
+      "fps": 8.0,
+      "tick_ms": 250,
+      "points_per_side": 16,
+      "cut_threshold": 30.0,
+      "reid_threshold": 0.4
+    }
+  },
+  "10": {
+    "class_type": "SaveText",
+    "inputs": {
+      "text": [
+        "9",
+        0
+      ],
+      "filename_prefix": "sticker_track",
+      "format": "json"
+    }
+  }
+}
