@@ -68,12 +68,15 @@ class StickerLoadVideo:
 
 
 class StickerAnchorPick:
-    """Keeps the first-frame instance the user placed the sticker on."""
+    """Keeps the first-frame instance the user placed the sticker on.
+
+    SAM3 Detect returns one instance per prompt unless the prompt asks for more ("head:16").
+    """
 
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "masks": ("MASK", {"tooltip": "Per-instance masks of one frame (SAM3 Detect, individual_masks)."}),
+            "masks": ("MASK", {"tooltip": "Per-instance masks of one frame, best score first (SAM3 Detect, individual_masks)."}),
             "placement": ("STRING", {"multiline": True, "default": PLACEMENT_DEFAULT}),
         }}
 
@@ -97,11 +100,15 @@ class StickerAnchorPick:
             inside = bool(m[min(int(ay), H - 1), min(int(ax), W - 1)])
             dx = max(float(xs.min()) - ax, 0.0, ax - float(xs.max()))
             dy = max(float(ys.min()) - ay, 0.0, ay - float(ys.max()))
-            key = (0 if inside else 1, math.hypot(dx, dy), float(m.sum()))
+            dist = math.hypot(dx, dy)
+            size = math.sqrt((float(xs.max() - xs.min()) + 1) * (float(ys.max() - ys.min()) + 1))
+            if not inside and dist > 0.5 * max(size, p["scale"] * W):
+                continue
+            key = (0 if inside else 1, dist, i)
             if best is None or key < best[0]:
                 best = (key, i)
         if best is None:
-            raise ValueError("No head was found on the first frame.")
+            raise ValueError("No head was found under the sticker on the first frame.")
         i = best[1]
         return ((masks[i:i + 1] > 0.5).float(),)
 

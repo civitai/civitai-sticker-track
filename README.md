@@ -4,9 +4,9 @@ Keeps a sticker that was placed on the first frame of a video on the same spot o
 
 How it works:
 
-1. Core `SAM3_Detect` finds every head on frame 0; `StickerAnchorPick` keeps the one under the sticker.
+1. Core `SAM3_Detect` finds the heads on frame 0 (the prompt is `head:16`: a bare `head` returns only the best-scoring one); `StickerAnchorPick` keeps the one under the sticker and fails rather than take a head far from it.
 2. Core `SAM3_VideoTrack` (SAM 3.1) follows that head through the clip.
-3. `StickerTrack` seeds TAPNext++ points on the head around the sticker and fits an affine transform from the seed frame on every frame. Rotation is read off the sticker's own axis, so a head turn is not taken for a tilt. Cuts are confirmed against the points; after a cut the character is re-identified with SAM 3.1's own image encoder, and the sticker hides while the character is off screen. Each shot is smoothed, then resampled to fixed ticks.
+3. `StickerTrack` seeds TAPNext++ points on the head around the sticker and fits an affine transform from the seed frame on every frame. Rotation is read off the sticker's own axis, so a head turn is not taken for a tilt. Cuts are confirmed against the points. SAM 3.1 keeps the character's identity across cuts; a head that ever shares a frame with it is never taken for it, and the sticker hides while the character is off screen or its centre is outside the frame. Each shot is smoothed, then resampled to fixed ticks.
 4. Core `SaveText` (format `json`) writes the track.
 
 ## Nodes

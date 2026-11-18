@@ -39,44 +39,39 @@ def detect_cuts(grey_small, threshold):
 def assign_target(masks, embed, cuts, min_area, reid_threshold, fps):
     """Object index of the tracked character per frame (None when it is not on screen).
 
-    Object 0 is the frame-0 head the user placed on. Without a cut only that same object
-    may come back; after a cut, or a long absence, any head that looks like it may take over.
+    Object 0 is the frame-0 head the user placed on, and SAM3 gives it back that index when it
+    returns after a cut. Another object may stand in for it only after a cut or a long absence,
+    and never one that shared a frame with object 0: that is someone else.
     """
     n, k = masks.shape[:2]
-    area = masks.reshape(n, k, -1).mean(-1)
-    present = area > min_area
+    present = masks.reshape(n, k, -1).mean(-1) > min_area
+    seen_with_target = (present & present[:, :1]).any(0)
     ref = embed(0, 0)
     cutset = set(cuts)
     patience = max(1, int(round(fps)))
     log = []
 
-    def best_match(t, keep=None):
-        scored = {j: float(ref @ embed(t, j)) for j in range(k) if present[t, j]}
-        log.append({"t": t, "keep": keep, "sims": {str(j): round(s, 3) for j, s in scored.items()}})
-        if keep in scored and scored[keep] >= reid_threshold:
-            return keep
-        if not scored:
-            return None
-        j = max(scored, key=scored.get)
-        return j if scored[j] >= reid_threshold else None
+    def best_match(t):
+        scored = {j: float(ref @ embed(t, j)) for j in range(1, k) if present[t, j] and not seen_with_target[j]}
+        log.append({"t": t, "sims": {str(j): round(s, 3) for j, s in scored.items()}})
+        j = max(scored, key=scored.get, default=None)
+        return j if j is not None and scored[j] >= reid_threshold else None
 
     tgt = [None] * n
-    tgt[0] = 0
     cur, missing = 0, 0
-    for t in range(1, n):
-        if t in cutset:
-            cur = best_match(t, keep=cur)
-            missing = 0
+    for t in range(n):
+        if present[t, 0]:
+            cur, missing = 0, 0
+        elif t in cutset:
+            cur, missing = best_match(t), 0
         elif cur is not None and present[t, cur]:
             missing = 0
         else:
             missing += 1
-            if cur is not None and missing <= patience:
-                tgt[t] = None
-                continue
-            if cur is not None or missing % max(1, patience // 4) == 0:
+            if missing > patience and missing % max(1, patience // 4) == 0:
                 cur = best_match(t)
         tgt[t] = cur if cur is not None and present[t, cur] else None
+    tgt[0] = 0
     return tgt, log
 
 
@@ -360,6 +355,8 @@ def encode_v1(poses, H, W, fps, tick_ms):
             samples.append(Pose(p.cx + (q.cx - p.cx) * a, p.cy + (q.cy - p.cy) * a, p.w + (q.w - p.w) * a, p.r + dr * a))
         else:
             samples.append(poses[int(round(f))] if poses[int(round(f))] is not None else None)
+    # The app bounds x and y to the frame, so a sticker whose centre has left it is hidden, not pinned to the edge.
+    samples = [s if s is None or (0.0 <= s.cx <= W and 0.0 <= s.cy <= H) else None for s in samples]
 
     last = next((s for s in samples if s is not None), None)
     xs, ys, ss, rs, show = [], [], [], [], []

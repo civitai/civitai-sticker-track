@@ -16,7 +16,7 @@
   "3": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "head",
+      "text": "head:16",
       "clip": [
         "2",
         1
@@ -84,7 +84,7 @@
         0
       ],
       "detection_threshold": 0.5,
-      "max_objects": 8,
+      "max_objects": 16,
       "detect_interval": 2
     }
   },
