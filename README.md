@@ -39,7 +39,7 @@ Put the TAPNext++ file in `models/tapnext/`, or pass an absolute path. The TAPNe
 
 ## Workflow
 
-[`workflows/sticker_track_api.json`](workflows/sticker_track_api.json) is the API-format graph with the fast settings (8 fps, TAPNext++ 256, detection every second frame). It needs ComfyUI with the SAM 3 nodes and ComfyUI-VideoHelperSuite. On an RTX 4090 it takes about 0.9 s per second of video once the models are loaded; 12 fps with the 512 checkpoint and detection on every frame takes about 1.8 s.
+[`workflows/sticker_track_api.json`](workflows/sticker_track_api.json) is the API-format graph with the fast settings (8 fps, TAPNext++ 256, detection every second frame). It needs ComfyUI with the SAM 3 nodes and ComfyUI-VideoHelperSuite. Load the video with `VHS_LoadVideoFFmpegPath`: the OpenCV loader (`VHS_LoadVideoPath`) cannot decode AV1, which many uploaded videos use. On an RTX 4090 it takes about 0.9 s per second of video once the models are loaded; 12 fps with the 512 checkpoint and detection on every frame takes about 1.8 s.
 
 ## Licence
 
