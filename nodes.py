@@ -21,6 +21,52 @@ if "tapnext" not in folder_paths.folder_names_and_paths:
 PLACEMENT_DEFAULT = '{"x": 0.5, "y": 0.4, "scale": 0.2, "rotation": 0}'
 
 
+class StickerLoadVideo:
+    """Decodes only the frames on an fps grid, with PyAV (AV1 included), downscaled to max_side."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "video": ("STRING", {"tooltip": "Path to the video file (a customComfy resource AIR resolves to one)."}),
+            "fps": ("FLOAT", {"default": 8.0, "min": 1.0, "max": 60.0, "step": 0.5}),
+            "max_side": ("INT", {"default": 1024, "min": 0, "max": 8192,
+                                 "tooltip": "Longest side of the returned frames; 0 keeps the source size."}),
+        }}
+
+    RETURN_TYPES = ("IMAGE", "FLOAT")
+    RETURN_NAMES = ("frames", "fps")
+    FUNCTION = "load"
+    CATEGORY = "civitai/sticker"
+
+    def load(self, video, fps, max_side):
+        import av
+
+        path = video if os.path.isabs(video) else folder_paths.get_annotated_filepath(video)
+        step = 1.0 / fps
+        frames, t0, k = [], None, 0
+        with av.open(path) as container:
+            stream = container.streams.video[0]
+            stream.thread_type = "AUTO"
+            for frame in container.decode(stream):
+                if frame.time is None:
+                    continue
+                if t0 is None:
+                    t0 = frame.time
+                if frame.time - t0 + 1e-4 < k * step:
+                    continue
+                img = frame.to_ndarray(format="rgb24")
+                h, w = img.shape[:2]
+                if max_side and max(h, w) > max_side:
+                    s = max_side / max(h, w)
+                    img = cv2.resize(img, (max(2, round(w * s)), max(2, round(h * s))), interpolation=cv2.INTER_AREA)
+                frames.append(torch.from_numpy(img))
+                while k * step <= frame.time - t0 + 1e-4:
+                    k += 1
+        if not frames:
+            raise ValueError(f"No frames decoded from {video}")
+        return (torch.stack(frames).float().div_(255.0), float(fps))
+
+
 class StickerAnchorPick:
     """Keeps the first-frame instance the user placed the sticker on."""
 
@@ -279,6 +325,7 @@ class StickerTrackPreview:
 
 
 NODE_CLASS_MAPPINGS = {
+    "StickerLoadVideo": StickerLoadVideo,
     "StickerAnchorPick": StickerAnchorPick,
     "TAPNextLoader": TAPNextLoader,
     "StickerTrack": StickerTrack,
@@ -286,6 +333,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "StickerLoadVideo": "Sticker Load Video",
     "StickerAnchorPick": "Sticker Anchor Pick",
     "TAPNextLoader": "TAPNext++ Loader",
     "StickerTrack": "Sticker Track (SAM3 + TAPNext++)",
