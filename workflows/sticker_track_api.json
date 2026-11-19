@@ -4,7 +4,9 @@
     "inputs": {
       "video": "VIDEO_AIR",
       "fps": 8.0,
-      "max_side": 1024
+      "max_side": 1024,
+      "start_ms": 0,
+      "max_ms": 60000
     }
   },
   "2": {

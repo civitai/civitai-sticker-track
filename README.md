@@ -1,6 +1,6 @@
 # ComfyUI-StickerTrack
 
-Keeps a sticker that was placed on the first frame of a video on the same spot of a character (eyes, mouth, head, anywhere on the face) for the whole clip, and exports the pose per frame as JSON. It works the same way for people, anime, cartoons, animals and costumes: nothing in it picks a model per character type.
+Keeps a sticker that was placed on a frame of a video on the same spot of a character (eyes, mouth, head, anywhere on the face) for the rest of the clip, and exports the pose per frame as JSON. It works the same way for people, anime, cartoons, animals and costumes: nothing in it picks a model per character type.
 
 How it works:
 
@@ -13,13 +13,13 @@ How it works:
 
 | Node | Inputs | Output |
 |---|---|---|
-| `StickerLoadVideo` | video path, `fps`, `max_side` | frames on an fps grid, `fps` |
+| `StickerLoadVideo` | video path, `fps`, `max_side`, optional `start_ms` and `max_ms` | frames on an fps grid from `start_ms`, `fps` |
 | `StickerAnchorPick` | per-instance `MASK` of frame 0, `placement` | `initial_mask` for `SAM3_VideoTrack` |
 | `TAPNextLoader` | TAPNext++ checkpoint, `resolution` (256 or 512) | `TAPNEXT` |
 | `StickerTrack` | frames, `SAM3_TRACK_DATA`, SAM 3.1 `MODEL`, `TAPNEXT`, `placement`, `fps`, `tick_ms`, optional eye `CONDITIONING` | `track_json`, `stats_json` |
 | `StickerTrackPreview` | frames, `track_json`, sticker image and mask | frames with the sticker drawn on |
 
-`placement` is the sticker on frame 0: `{"x": 0.42, "y": 0.41, "scale": 0.3, "rotation": -11}`. `x`/`y` are the sticker centre as fractions of the frame width/height, `scale` is the sticker width as a fraction of the frame width, `rotation` is in degrees, clockwise.
+`placement` is the sticker on the first loaded frame (`start_ms`): `{"x": 0.42, "y": 0.41, "scale": 0.3, "rotation": -11}`. `x`/`y` are the sticker centre as fractions of the frame width/height, `scale` is the sticker width as a fraction of the frame width, `rotation` is in degrees, clockwise.
 
 ## Output
 
@@ -27,7 +27,7 @@ How it works:
 {"v":1,"ms":250,"show":[[0,1],[19,0]],"x":[[0,0.42],[1,0.4253]],"y":[[0,0.412],[1,0.4111]],"s":[[0,0.3],[1,0.3059]],"r":[[0,-11.0],[1,-10.4]]}
 ```
 
-Each channel is a list of `[tick, value]` pairs, time = `tick * ms`. Values are linear between pairs and held after the last one; `show` is a step channel (1 shown, 0 hidden) and is left out when the sticker is shown throughout. Scale is clamped to 0.05–0.4 and rotation wrapped to [-180, 180).
+Each channel is a list of `[tick, value]` pairs, time = `start_ms + tick * ms`. Values are linear between pairs and held after the last one; `show` is a step channel (1 shown, 0 hidden) and is left out when the sticker is shown throughout. Scale is clamped to 0.05–0.4 and rotation wrapped to [-180, 180).
 
 ## Models
 
@@ -40,7 +40,7 @@ Put the TAPNext++ file in `models/tapnext/`, or pass an absolute path. The TAPNe
 
 ## Workflow
 
-[`workflows/sticker_track_api.json`](workflows/sticker_track_api.json) is the API-format graph with the fast settings (8 fps, TAPNext++ 256, detection every second frame). It needs ComfyUI with the SAM 3 nodes. `StickerLoadVideo` decodes with PyAV, so AV1 uploads work (OpenCV-based loaders often cannot decode AV1), and keeps only the frames on the fps grid. On an RTX 4090 it takes about 0.9 s per second of video once the models are loaded; 12 fps with the 512 checkpoint and detection on every frame takes about 1.8 s.
+[`workflows/sticker_track_api.json`](workflows/sticker_track_api.json) is the API-format graph with the fast settings (8 fps, TAPNext++ 256, detection every second frame). It needs ComfyUI with the SAM 3 nodes. `StickerLoadVideo` decodes with PyAV, so AV1 uploads work (OpenCV-based loaders often cannot decode AV1), and keeps only the frames on the fps grid. `start_ms` seeks to the keyframe before that point instead of decoding from the start, and `max_ms` stops after that much video (0 runs to the end). On an RTX 4090 it takes about 0.9 s per second of video once the models are loaded; 12 fps with the 512 checkpoint and detection on every frame takes about 1.8 s.
 
 ## Licence
 

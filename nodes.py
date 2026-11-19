@@ -1,3 +1,4 @@
+import itertools
 import json
 import math
 import os
@@ -31,6 +32,11 @@ class StickerLoadVideo:
             "fps": ("FLOAT", {"default": 8.0, "min": 1.0, "max": 60.0, "step": 0.5}),
             "max_side": ("INT", {"default": 1024, "min": 0, "max": 8192,
                                  "tooltip": "Longest side of the returned frames; 0 keeps the source size."}),
+        }, "optional": {
+            "start_ms": ("INT", {"default": 0, "min": 0, "max": 86_400_000,
+                                 "tooltip": "First frame returned, in ms from the start of the video. Track tick 0 lands here."}),
+            "max_ms": ("INT", {"default": 0, "min": 0, "max": 86_400_000,
+                               "tooltip": "Length to return from start_ms; 0 runs to the end of the video."}),
         }}
 
     RETURN_TYPES = ("IMAGE", "FLOAT")
@@ -38,32 +44,42 @@ class StickerLoadVideo:
     FUNCTION = "load"
     CATEGORY = "civitai/sticker"
 
-    def load(self, video, fps, max_side):
+    def load(self, video, fps, max_side, start_ms=0, max_ms=0):
         import av
 
         path = video if os.path.isabs(video) else folder_paths.get_annotated_filepath(video)
         step = 1.0 / fps
-        frames, t0, k = [], None, 0
+        span = max_ms / 1000.0 if max_ms else math.inf
+        frames, k = [], 0
         with av.open(path) as container:
             stream = container.streams.video[0]
             stream.thread_type = "AUTO"
-            for frame in container.decode(stream):
-                if frame.time is None:
+            decoded = (f for f in container.decode(stream) if f.time is not None)
+            first = next(decoded, None)
+            if first is None:
+                raise ValueError(f"No frames decoded from {video}")
+            start = first.time + start_ms / 1000.0
+            if start_ms:
+                container.seek(int(start / stream.time_base), stream=stream)
+                decoded = (f for f in container.decode(stream) if f.time is not None)
+            else:
+                decoded = itertools.chain([first], decoded)
+            for frame in decoded:
+                at = frame.time - start
+                if at + 1e-4 < k * step:
                     continue
-                if t0 is None:
-                    t0 = frame.time
-                if frame.time - t0 + 1e-4 < k * step:
-                    continue
+                if at + 1e-4 >= span:
+                    break
                 img = frame.to_ndarray(format="rgb24")
                 h, w = img.shape[:2]
                 if max_side and max(h, w) > max_side:
                     s = max_side / max(h, w)
                     img = cv2.resize(img, (max(2, round(w * s)), max(2, round(h * s))), interpolation=cv2.INTER_AREA)
                 frames.append(torch.from_numpy(img))
-                while k * step <= frame.time - t0 + 1e-4:
+                while k * step <= at + 1e-4:
                     k += 1
         if not frames:
-            raise ValueError(f"No frames decoded from {video}")
+            raise ValueError(f"No frames in {video} from {start_ms} ms: the video is shorter than that")
         return (torch.stack(frames).float().div_(255.0), float(fps))
 
 
