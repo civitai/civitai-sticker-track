@@ -36,7 +36,7 @@ def detect_cuts(grey_small, threshold):
     return [int(i) + 1 for i in np.nonzero(d > threshold)[0]]
 
 
-def assign_target(masks, embed, cuts, min_area, reid_threshold, fps):
+def assign_target(masks, embed, cuts, min_area, reid_threshold, fps, reid=True):
     """Object index of the tracked character per frame (None when it is not on screen).
 
     Object 0 is the frame-0 head the user placed on, and SAM3 gives it back that index when it
@@ -52,6 +52,8 @@ def assign_target(masks, embed, cuts, min_area, reid_threshold, fps):
     log = []
 
     def best_match(t):
+        if not reid:
+            return None
         scored = {j: float(ref @ embed(t, j)) for j in range(1, k) if present[t, j] and not seen_with_target[j]}
         log.append({"t": t, "sims": {str(j): round(s, 3) for j, s in scored.items()}})
         j = max(scored, key=scored.get, default=None)
@@ -199,7 +201,7 @@ def leash(pose, anchor, box, frac):
     return Pose(cx, cy, math.exp(lw), pose.r)
 
 
-def solve(n, H, W, fps, view, tgt, cuts, placement, track_points, per_side=16, leash_frac=0.2):
+def solve(n, H, W, fps, view, tgt, cuts, placement, track_points, per_side=16, leash_frac=0.2, occlusion=None):
     p0 = Pose(placement["x"] * W, placement["y"] * H, placement["scale"] * W, placement["rotation"])
     poses = [None] * n
     poses[0] = p0
@@ -207,7 +209,8 @@ def solve(n, H, W, fps, view, tgt, cuts, placement, track_points, per_side=16, l
     cutset = set(cuts)
     switches = {t for t in range(1, n) if tgt[t] is not None and tgt[t] != tgt[t - 1]}
     stats = {"frames": n, "cuts": sorted(cuts), "true_cuts": [], "segments": 0, "point_frames": 0,
-             "held_frames": 0, "hidden_frames": 0, "reseeds": 0}
+             "held_frames": 0, "hidden_frames": 0, "reseeds": 0, "occluded_frames": 0}
+    covered = [False] * n
 
     thr = max(2.0, 0.006 * max(H, W))
     reseed_after = max(4, int(round(fps)))
@@ -236,6 +239,8 @@ def solve(n, H, W, fps, view, tgt, cuts, placement, track_points, per_side=16, l
                         stop, cut_at = t, t
                         break
                     continue
+                if occlusion is not None:
+                    covered[t] = float(vis[w == 1].mean()) < occlusion[0] if (w == 1).any() else False
                 ok = vis & (pos[:, 0] >= 0) & (pos[:, 0] < W) & (pos[:, 1] >= 0) & (pos[:, 1] < H)
                 ok &= view.contains(t, k, pos)
                 frac = float((w * ok).sum() / w.sum())
@@ -286,6 +291,20 @@ def solve(n, H, W, fps, view, tgt, cuts, placement, track_points, per_side=16, l
         last_w = seed_pose.w
         switches.add(nxt)
 
+    if occlusion is not None:
+        t = 0
+        while t < n:
+            if not covered[t]:
+                t += 1
+                continue
+            e = t
+            while e < n and covered[e]:
+                e += 1
+            if e - t >= occlusion[1]:
+                for m in range(t, e):
+                    poses[m] = None
+                stats["occluded_frames"] += e - t
+            t = e
     stats["hidden_frames"] = sum(p is None for p in poses)
     return poses, sorted(switches | set(stats["true_cuts"])), stats
 

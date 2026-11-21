@@ -1,14 +1,14 @@
 [project]
-name = "comfyui-sticker-track"
+name = "civitai-sticker-track"
 description = "Keep a sticker placed on the first frame of a video on a character's head, eyes or mouth (SAM 3.1 + TAPNext++), exported as a per-frame JSON track."
-version = "1.0.3"
+version = "1.1.0"
 license = { file = "LICENSE" }
 dependencies = ["einops", "scipy", "opencv-python-headless"]
 
 [project.urls]
-Repository = "https://github.com/rmatif/ComfyUI-StickerTrack"
+Repository = "https://github.com/civitai/civitai-sticker-track"
 
 [tool.comfy]
-PublisherId = "rmatif"
-DisplayName = "ComfyUI-StickerTrack"
+PublisherId = "civitai"
+DisplayName = "Civitai Sticker Track"
 Icon = ""

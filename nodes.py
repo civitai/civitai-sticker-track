@@ -94,17 +94,34 @@ class StickerAnchorPick:
         return {"required": {
             "masks": ("MASK", {"tooltip": "Per-instance masks of one frame, best score first (SAM3 Detect, individual_masks)."}),
             "placement": ("STRING", {"multiline": True, "default": PLACEMENT_DEFAULT}),
+        }, "optional": {
+            "fallback_masks": ("MASK", {"tooltip": "Used only when no head is under the sticker, e.g. SAM3 Detect with a point prompt at the sticker centre. The sticker then follows whatever it is on."}),
         }}
 
-    RETURN_TYPES = ("MASK",)
-    RETURN_NAMES = ("initial_mask",)
+    RETURN_TYPES = ("MASK", "BOOLEAN")
+    RETURN_NAMES = ("initial_mask", "on_head")
     FUNCTION = "pick"
     CATEGORY = "civitai/sticker"
 
-    def pick(self, masks, placement):
+    def pick(self, masks, placement, fallback_masks=None):
         p = tracking.parse_placement(placement)
-        if masks.ndim == 2:
-            masks = masks[None]
+        i = self._best(masks, p)
+        if i is not None:
+            return ((self._batch(masks)[i:i + 1] > 0.5).float(), True)
+        if fallback_masks is not None:
+            i = self._best(fallback_masks, p)
+            if i is not None:
+                return ((self._batch(fallback_masks)[i:i + 1] > 0.5).float(), False)
+        raise ValueError("Nothing was found under the sticker on the first frame.")
+
+    @staticmethod
+    def _batch(masks):
+        return masks[None] if masks.ndim == 2 else masks
+
+    def _best(self, masks, p):
+        masks = self._batch(masks)
+        if masks.shape[0] == 0:
+            return None
         H, W = masks.shape[1:]
         ax, ay = p["x"] * W, p["y"] * H
         best = None
@@ -123,10 +140,7 @@ class StickerAnchorPick:
             key = (0 if inside else 1, dist, i)
             if best is None or key < best[0]:
                 best = (key, i)
-        if best is None:
-            raise ValueError("No head was found under the sticker on the first frame.")
-        i = best[1]
-        return ((masks[i:i + 1] > 0.5).float(),)
+        return None if best is None else best[1]
 
 
 class TAPNextLoader:
@@ -291,6 +305,10 @@ class StickerTrack:
                                          "tooltip": "Cosine similarity to the frame-0 head a head needs to take over after a cut."}),
         }, "optional": {
             "eyes": ("CONDITIONING", {"tooltip": "SAM3 text conditioning for eyes (\"eye:4\"). Glasses then turn with the eye line, not the head's nod."}),
+            "reid": ("BOOLEAN", {"default": True, "tooltip": "Let another head take over after a cut. Wire StickerAnchorPick's on_head here: a sticker on something that is not a head then hides when it is lost instead of jumping to a person."}),
+            "hide_occluded": ("BOOLEAN", {"default": False, "tooltip": "Hide the sticker while the points under it are covered."}),
+            "occluded_below": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip": "Share of the points under the sticker that must stay visible."}),
+            "occluded_frames": ("INT", {"default": 2, "min": 1, "max": 60, "tooltip": "Consecutive frames below that share before the sticker hides."}),
         }}
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -298,7 +316,8 @@ class StickerTrack:
     FUNCTION = "track"
     CATEGORY = "civitai/sticker"
 
-    def track(self, images, track_data, sam3, tapnext, placement, fps, tick_ms, points_per_side, cut_threshold, reid_threshold, eyes=None):
+    def track(self, images, track_data, sam3, tapnext, placement, fps, tick_ms, points_per_side, cut_threshold, reid_threshold, eyes=None,
+              reid=True, hide_occluded=False, occluded_below=0.25, occluded_frames=2):
         from comfy.ldm.sam3.tracker import unpack_masks
 
         t_start = time.perf_counter()
@@ -326,14 +345,15 @@ class StickerTrack:
 
         view = tracking.MaskView(masks, H, W)
         embed = _HeadEmbedder(sam3, images, view, device)
-        tgt, reid_log = tracking.assign_target(masks, embed, cuts, min_area=2e-4, reid_threshold=reid_threshold, fps=fps)
+        tgt, reid_log = tracking.assign_target(masks, embed, cuts, min_area=2e-4, reid_threshold=reid_threshold, fps=fps, reid=reid)
         t_prep = time.perf_counter()
 
         model = tapnext["model"]
         model.to(device)
         tracker = _PointTracker(tapnext, images, device)
         try:
-            poses, boundaries, stats = tracking.solve(n, H, W, fps, view, tgt, cuts, p, tracker, points_per_side)
+            poses, boundaries, stats = tracking.solve(n, H, W, fps, view, tgt, cuts, p, tracker, points_per_side,
+                                                      occlusion=(occluded_below, occluded_frames) if hide_occluded else None)
         finally:
             model.to(mm.unet_offload_device())
         t_eyes = time.perf_counter()

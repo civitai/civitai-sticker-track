@@ -1,0 +1,13 @@
+Civitai Sticker Track
+Copyright 2026 Civitai
+
+This product is a fork of ComfyUI-StickerTrack (https://github.com/rmatif/ComfyUI-StickerTrack),
+written by rmatif for Civitai and licensed under the Apache License, Version 2.0.
+
+Changes in this fork (1.1.0):
+- StickerAnchorPick takes optional fallback_masks, used when no head is under the sticker,
+  and returns on_head.
+- StickerTrack takes reid (wire on_head to it): a sticker on something that is not a head hides
+  when its subject is lost instead of re-identifying onto a person after a cut.
+- StickerTrack takes hide_occluded / occluded_below / occluded_frames (off by default): hide while
+  the points under the sticker are covered.
