@@ -1,4 +1,9 @@
-# ComfyUI-StickerTrack
+# Civitai Sticker Track
+
+Civitai's fork of [ComfyUI-StickerTrack](https://github.com/rmatif/ComfyUI-StickerTrack) by rmatif (Apache-2.0, see NOTICE), published to the Comfy registry as `civitai/civitai-sticker-track`. What 1.1.0 adds is in CHANGELOG.md: a point-prompt fallback anchor for stickers that are not on a head, no re-identification takeover for those, eye anchoring, and an optional hide-while-covered mode. Tests: `python tests/test_tracking.py`.
+
+The rest of this file is the upstream description.
+
 
 Keeps a sticker that was placed on a frame of a video on the same spot of a character (eyes, mouth, head, anywhere on the face) for the rest of the clip, and exports the pose per frame as JSON. It works the same way for people, anime, cartoons, animals and costumes: nothing in it picks a model per character type.
 

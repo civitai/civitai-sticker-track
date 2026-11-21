@@ -488,3 +488,61 @@ def snap_rotation(poses, boundaries, lines):
                 out[t] = Pose(p.cx, p.cy, p.w, p.r + float(corr[t - i]))
         i = j
     return out
+
+
+def eye_anchor(poses, boundaries, eyes, max_gap=0.75):
+    """Hold a sticker that starts on an eye to that eye, wherever SAM 3.1 finds it.
+
+    `eyes` maps a frame to its eye detections (cx, cy, area) in image pixels. The sticker counts as on an
+    eye when an eye of about its size sits under its frame-0 centre; the frame-0 offset from that eye is
+    kept (scaled with the sticker). On frames with a detection near where the eye should be, the position
+    is corrected onto it, and the correction is interpolated between detections, so the head box and the
+    points only carry the sticker in between. Rotation and size are left alone.
+    """
+    p0 = poses[0]
+    if p0 is None or not eyes.get(0):
+        return list(poses)
+
+    def near(cands, x, y, w, gap):
+        best = None
+        for cx, cy, area in cands:
+            d = math.hypot(cx - x, cy - y)
+            if d <= gap * w and 0.15 * w <= math.sqrt(area) <= 2.0 * w and (best is None or d < best[0]):
+                best = (d, cx, cy)
+        return best
+
+    e0 = near(eyes[0], p0.cx, p0.cy, p0.w, 0.5)
+    if e0 is None:
+        return list(poses)
+    ox, oy = p0.cx - e0[1], p0.cy - e0[2]
+    n = len(poses)
+    out = list(poses)
+    cut = set(boundaries)
+    i = 0
+    while i < n:
+        if poses[i] is None:
+            i += 1
+            continue
+        j = i + 1
+        while j < n and poses[j] is not None and j not in cut:
+            j += 1
+        ts, cx_, cy_ = [], [], []
+        lx = ly = 0.0  # the last correction: the drift is measured from there, not from frame 0
+        for t in range(i, j):
+            p = poses[t]
+            k = p.w / p0.w
+            if t == 0:
+                ts.append(0); cx_.append(0.0); cy_.append(0.0)
+                continue
+            e = near(eyes.get(t, ()), p.cx + lx - ox * k, p.cy + ly - oy * k, p.w, max_gap)
+            if e is not None:
+                lx, ly = e[1] + ox * k - p.cx, e[2] + oy * k - p.cy
+                ts.append(t); cx_.append(lx); cy_.append(ly)
+        if ts:
+            fx = np.interp(np.arange(i, j), ts, cx_)
+            fy = np.interp(np.arange(i, j), ts, cy_)
+            for t in range(i, j):
+                p = poses[t]
+                out[t] = Pose(p.cx + float(fx[t - i]), p.cy + float(fy[t - i]), p.w, p.r)
+        i = j
+    return out

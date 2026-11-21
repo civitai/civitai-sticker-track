@@ -246,7 +246,7 @@ def _eye_lines(sam3, eyes_cond, images, poses, tgt, view, fps, size=504):
 
     n, H, W = images.shape[:3]
     step = max(1, int(round(fps / 2)))
-    starts = {t for t in range(1, n) if poses[t] is not None and poses[t - 1] is None}
+    starts = {t for t in range(1, n) if poses[t] is not None and poses[t - 1] is None} | {0}
     frames, crops = [], []
     for t in sorted(set(range(step, n, step)) | starts):
         p = poses[t]
@@ -258,9 +258,9 @@ def _eye_lines(sam3, eyes_cond, images, poses, tgt, view, fps, size=504):
         crop = images[t:t + 1, y0:y0 + side, x0:x0 + side, :3].movedim(-1, 1)
         crops.append(F.interpolate(crop, size=(size, size), mode="bilinear", align_corners=False).movedim(1, -1))
         frames.append((t, x0, y0, side / size))
-    lines = {}
+    lines, eye_pts = {}, {}
     if not crops:
-        return lines
+        return lines, eye_pts
     masks, boxes = [], []
     for c in range(0, len(crops), 32):
         m, bb = SAM3_Detect.execute(model=sam3, image=torch.cat(crops[c:c + 32]), conditioning=eyes_cond,
@@ -278,10 +278,12 @@ def _eye_lines(sam3, eyes_cond, images, poses, tgt, view, fps, size=504):
         at += len(found)
         if eyes:
             inside = view.contains(t, tgt[t], np.array([e[:2] for e in eyes], np.float32))
-            a = tracking.eye_line([e for e, ok in zip(eyes, inside) if ok], poses[t])
+            eyes = [e for e, ok in zip(eyes, inside) if ok]
+            eye_pts[t] = eyes
+            a = tracking.eye_line(eyes, poses[t]) if t else None
             if a is not None:
                 lines[t] = a
-    return lines
+    return lines, eye_pts
 
 
 class StickerTrack:
@@ -309,6 +311,7 @@ class StickerTrack:
             "hide_occluded": ("BOOLEAN", {"default": False, "tooltip": "Hide the sticker while the points under it are covered."}),
             "occluded_below": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip": "Share of the points under the sticker that must stay visible."}),
             "occluded_frames": ("INT", {"default": 2, "min": 1, "max": 60, "tooltip": "Consecutive frames below that share before the sticker hides."}),
+            "anchor_eyes": ("BOOLEAN", {"default": True, "tooltip": "A sticker placed on an eye follows that eye's detection (needs eyes), not only the head."}),
         }}
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -317,7 +320,7 @@ class StickerTrack:
     CATEGORY = "civitai/sticker"
 
     def track(self, images, track_data, sam3, tapnext, placement, fps, tick_ms, points_per_side, cut_threshold, reid_threshold, eyes=None,
-              reid=True, hide_occluded=False, occluded_below=0.25, occluded_frames=2):
+              reid=True, hide_occluded=False, occluded_below=0.25, occluded_frames=2, anchor_eyes=True):
         from comfy.ldm.sam3.tracker import unpack_masks
 
         t_start = time.perf_counter()
@@ -359,8 +362,10 @@ class StickerTrack:
         t_eyes = time.perf_counter()
         lines = {}
         if eyes is not None:
-            lines = _eye_lines(sam3, eyes, images, poses, tgt, view, fps)
+            lines, eye_pts = _eye_lines(sam3, eyes, images, poses, tgt, view, fps)
             poses = tracking.snap_rotation(poses, boundaries, lines)
+            if anchor_eyes:
+                poses = tracking.eye_anchor(poses, boundaries, eye_pts)
         t_eyes = time.perf_counter() - t_eyes
         smoothed = tracking.smooth(poses, boundaries, fps)
         track = tracking.encode_v1(smoothed, H, W, fps, tick_ms)
