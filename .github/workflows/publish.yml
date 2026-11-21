@@ -33,7 +33,7 @@ jobs:
           awk -v h="## [$version]" 'index($0,h)==1 {g=1; next} g && /^## / {exit} g {print}' \
             CHANGELOG.md > changelog-section.md
           if ! grep -q '[^[:space:]]' changelog-section.md; then
-            echo "::warning::No CHANGELOG.md section for $version â publishing with empty release notes."
+            echo "::warning::No CHANGELOG.md section for $version — publishing with empty release notes."
           fi
           echo "----- release notes for $version -----"
           cat changelog-section.md
@@ -53,7 +53,7 @@ jobs:
           comfy --skip-prompt node publish --token "$REGISTRY_ACCESS_TOKEN" \
             --changelog-file changelog-section.md
 
-      # Reached only when Publish succeeds â a duplicate-version publish fails the job above,
+      # Reached only when Publish succeeds — a duplicate-version publish fails the job above,
       # so a tag/release is cut exactly once, for a genuinely new version.
       - name: Tag + GitHub Release
         env:
@@ -61,7 +61,7 @@ jobs:
         run: |
           tag="v${{ steps.meta.outputs.version }}"
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release $tag already exists â skipping."
+            echo "Release $tag already exists — skipping."
           else
             gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" \
               --notes-file changelog-section.md
