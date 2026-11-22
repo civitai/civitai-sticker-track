@@ -95,7 +95,8 @@ class StickerAnchorPick:
             "masks": ("MASK", {"tooltip": "Per-instance masks of one frame, best score first (SAM3 Detect, individual_masks)."}),
             "placement": ("STRING", {"multiline": True, "default": PLACEMENT_DEFAULT}),
         }, "optional": {
-            "fallback_masks": ("MASK", {"tooltip": "Used only when no head is under the sticker, e.g. SAM3 Detect with a point prompt at the sticker centre. The sticker then follows whatever it is on."}),
+            "fallback_masks": ("MASK", {"tooltip": "SAM3 Detect with a point prompt at the sticker centre. A sticker whose centre is on one of these follows it, even beside a face, unless its centre is on a head or a worn mask."}),
+            "worn_masks": ("MASK", {"tooltip": "Things worn on a head (e.g. SAM3 Detect \"hat:4\", \"helmet:4\"). A sticker on one follows the nearest head, like one on the head itself."}),
         }}
 
     RETURN_TYPES = ("MASK", "BOOLEAN")
@@ -103,44 +104,21 @@ class StickerAnchorPick:
     FUNCTION = "pick"
     CATEGORY = "civitai/sticker"
 
-    def pick(self, masks, placement, fallback_masks=None):
+    def pick(self, masks, placement, fallback_masks=None, worn_masks=None):
         p = tracking.parse_placement(placement)
-        i = self._best(masks, p)
-        if i is not None:
-            return ((self._batch(masks)[i:i + 1] > 0.5).float(), True)
-        if fallback_masks is not None:
-            i = self._best(fallback_masks, p)
-            if i is not None:
-                return ((self._batch(fallback_masks)[i:i + 1] > 0.5).float(), False)
-        raise ValueError("Nothing was found under the sticker on the first frame.")
+        heads = self._batch(masks) > 0.5
+        objects = None if fallback_masks is None else self._batch(fallback_masks) > 0.5
+        worn = None if worn_masks is None else (self._batch(worn_masks) > 0.5).cpu().numpy()
+        picked = tracking.pick_anchor(heads.cpu().numpy(), None if objects is None else objects.cpu().numpy(), p, worn=worn)
+        if picked is None:
+            raise ValueError("Nothing was found under the sticker on the first frame.")
+        kind, i = picked
+        chosen = heads if kind == "head" else objects
+        return (chosen[i:i + 1].float(), kind == "head")
 
     @staticmethod
     def _batch(masks):
         return masks[None] if masks.ndim == 2 else masks
-
-    def _best(self, masks, p):
-        masks = self._batch(masks)
-        if masks.shape[0] == 0:
-            return None
-        H, W = masks.shape[1:]
-        ax, ay = p["x"] * W, p["y"] * H
-        best = None
-        for i in range(masks.shape[0]):
-            m = masks[i] > 0.5
-            ys, xs = torch.nonzero(m, as_tuple=True)
-            if len(xs) == 0:
-                continue
-            inside = bool(m[min(int(ay), H - 1), min(int(ax), W - 1)])
-            dx = max(float(xs.min()) - ax, 0.0, ax - float(xs.max()))
-            dy = max(float(ys.min()) - ay, 0.0, ay - float(ys.max()))
-            dist = math.hypot(dx, dy)
-            size = math.sqrt((float(xs.max() - xs.min()) + 1) * (float(ys.max() - ys.min()) + 1))
-            if not inside and dist > 0.5 * max(size, p["scale"] * W):
-                continue
-            key = (0 if inside else 1, dist, i)
-            if best is None or key < best[0]:
-                best = (key, i)
-        return None if best is None else best[1]
 
 
 class TAPNextLoader:

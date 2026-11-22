@@ -57,6 +57,51 @@ def test_hide_when_eye_lost_hides_while_its_eye_is_missing():
     assert all(p is not None for p in tr.eye_anchor(poses, [], one_miss, hide_lost=True)), "a single miss does not hide"
 
 
+def _frame():
+    return np.zeros((1000, 1000), bool)
+
+
+def _box(rows, cols):
+    m = _frame()
+    m[rows[0]:rows[1], cols[0]:cols[1]] = True
+    return m
+
+
+HEAD = _box((400, 600), (200, 400))
+
+
+def _at(x, y, scale=0.08):
+    return {"x": x / 1000, "y": y / 1000, "scale": scale, "rotation": 0.0}
+
+
+def test_pick_follows_an_object_right_beside_a_head():
+    hammer = _box((450, 550), (420, 520))  # 20 px right of the head, well inside the old half-head reach
+    ball = _box((320, 390), (270, 340))  # 10 px above it
+    assert tr.pick_anchor([HEAD], [hammer], _at(470, 500)) == ("object", 0)
+    assert tr.pick_anchor([HEAD], [ball], _at(305, 355)) == ("object", 0)
+
+
+def test_pick_keeps_head_stickers_on_the_head():
+    glasses = _box((470, 500), (230, 370))  # inside the head mask
+    assert tr.pick_anchor([HEAD], [glasses], _at(300, 485)) == ("head", 0)
+    sky = ~_box((390, 610), (190, 410))  # a hat placed in the air just above the head prompts the background
+    assert tr.pick_anchor([HEAD], [sky], _at(300, 380)) == ("head", 0)
+    body = _box((380, 1000), (150, 450))  # a point on the shirt returns the whole person, head included
+    assert tr.pick_anchor([HEAD], [body], _at(300, 650)) == ("head", 0)
+    helmet = _box((330, 410), (220, 380))  # worn on the head, outside its mask
+    assert tr.pick_anchor([HEAD], [helmet], _at(300, 360)) == ("object", 0), "without worn masks a helmet is an object"
+    assert tr.pick_anchor([HEAD], [helmet], _at(300, 360), worn=[helmet]) == ("head", 0)
+    assert tr.pick_anchor([HEAD], [_box((450, 550), (420, 520))], _at(470, 500), worn=[helmet]) == ("object", 0)
+
+
+def test_pick_falls_back_and_gives_up():
+    far = _box((100, 200), (700, 800))
+    assert tr.pick_anchor([HEAD], [far], _at(750, 150)) == ("object", 0)
+    assert tr.pick_anchor([HEAD], None, _at(470, 500)) == ("head", 0), "no point masks: nearest head, as before"
+    assert tr.pick_anchor([HEAD], None, _at(750, 150)) is None
+    assert tr.pick_anchor(np.zeros((0, 1000, 1000), bool), [far], _at(750, 150)) == ("object", 0)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

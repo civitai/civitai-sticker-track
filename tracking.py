@@ -565,3 +565,68 @@ def eye_anchor(poses, boundaries, eyes, max_gap=0.75, hide_lost=False, lost_afte
                 m = e_
         i = j
     return out
+
+
+def _under(masks, ax, ay, sticker_px):
+    """(index, centre_inside) of the mask under (ax, ay), else the nearest one within half its size
+    (or half the sticker); (None, False) when none qualifies. Ties go to the earlier, higher-scored mask."""
+    best = None
+    H, W = masks.shape[1:]
+    for i in range(masks.shape[0]):
+        ys, xs = np.nonzero(masks[i])
+        if len(xs) == 0:
+            continue
+        inside = bool(masks[i][min(int(ay), H - 1), min(int(ax), W - 1)])
+        dist = math.hypot(max(xs.min() - ax, 0.0, ax - xs.max()), max(ys.min() - ay, 0.0, ay - ys.max()))
+        size = math.sqrt((xs.max() - xs.min() + 1.0) * (ys.max() - ys.min() + 1.0))
+        if not inside and dist > 0.5 * max(size, sticker_px):
+            continue
+        key = (0 if inside else 1, dist, i)
+        if best is None or key < best[0]:
+            best = (key, i)
+    return (None, False) if best is None else (best[1], best[0][0] == 0)
+
+
+def is_object_mask(mask, heads, max_area=0.25, max_shared=0.5):
+    """A point-prompt mask that is a thing of its own: not background (a quarter of the frame, or touching
+    two frame edges), and neither mostly inside a head (hair, a helmet) nor holding most of one (the body)."""
+    H, W = mask.shape
+    area = int(mask.sum())
+    if area == 0 or area > max_area * H * W:
+        return False
+    if int(mask[0].any()) + int(mask[-1].any()) + int(mask[:, 0].any()) + int(mask[:, -1].any()) >= 2:
+        return False
+    for head in heads:
+        shared = int((mask & head).sum())
+        if shared > max_shared * area or shared > max_shared * int(head.sum()):
+            return False
+    return True
+
+
+def pick_anchor(heads, objects, placement, worn=None):
+    """What a sticker follows, from first-frame masks: heads (one per head) and objects (a point prompt at
+    the sticker centre, or None). A sticker whose centre is on a head follows that head. One whose centre
+    is on an object follows the object, even right beside a face (a hammer, a ball). Otherwise the nearest
+    head within half its size, then the nearest object. worn (optional): masks of things worn on a head
+    (hat, helmet, glasses); a sticker on one follows the nearest head instead. Returns ("head" | "object",
+    index) or None."""
+    heads = np.asarray(heads, bool)
+    H, W = heads.shape[1:]
+    p = placement
+    ax, ay, sticker_px = p["x"] * W, p["y"] * H, p["scale"] * W
+    h, h_in = _under(heads, ax, ay, sticker_px)
+    if h is not None and h_in:
+        return ("head", h)
+    if h is not None and worn is not None and _under(np.asarray(worn, bool), ax, ay, 0.0)[1]:
+        return ("head", h)
+    o, o_in = (None, False)
+    if objects is not None:
+        objects = np.asarray(objects, bool)
+        o, o_in = _under(objects, ax, ay, sticker_px)
+        if o is not None and o_in and is_object_mask(objects[o], heads):
+            return ("object", o)
+    if h is not None:
+        return ("head", h)
+    if o is not None:
+        return ("object", o)
+    return None
