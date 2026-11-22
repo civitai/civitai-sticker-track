@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.2.0]
+
+- StickerTrack: `hide_when_eye_lost` (default off). A sticker placed on an eye hides while that eye is not found (2 or more eye samples in a row, about 1 s, for example when the head turns to profile and the eye is behind the snout) and shows again when the eye is found. No effect on a sticker that is not on an eye.
+
 ## [1.1.0]
 
 First Civitai release, forked from rmatif/ComfyUI-StickerTrack 1.0.3.

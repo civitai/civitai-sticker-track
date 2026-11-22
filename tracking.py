@@ -490,7 +490,7 @@ def snap_rotation(poses, boundaries, lines):
     return out
 
 
-def eye_anchor(poses, boundaries, eyes, max_gap=0.75):
+def eye_anchor(poses, boundaries, eyes, max_gap=0.75, hide_lost=False, lost_after=2):
     """Hold a sticker that starts on an eye to that eye, wherever SAM 3.1 finds it.
 
     `eyes` maps a frame to its eye detections (cx, cy, area) in image pixels. The sticker counts as on an
@@ -498,6 +498,9 @@ def eye_anchor(poses, boundaries, eyes, max_gap=0.75):
     kept (scaled with the sticker). On frames with a detection near where the eye should be, the position
     is corrected onto it, and the correction is interpolated between detections, so the head box and the
     points only carry the sticker in between. Rotation and size are left alone.
+
+    `eyes` holds every sampled frame, an empty list where nothing was found. With `hide_lost`, the sticker
+    hides from the first of `lost_after` or more samples in a row that miss its eye until the eye is found again.
     """
     p0 = poses[0]
     if p0 is None or not eyes.get(0):
@@ -527,6 +530,7 @@ def eye_anchor(poses, boundaries, eyes, max_gap=0.75):
         while j < n and poses[j] is not None and j not in cut:
             j += 1
         ts, cx_, cy_ = [], [], []
+        samples = []  # (frame, found) for every sampled frame after frame 0 in this run
         lx = ly = 0.0  # the last correction: the drift is measured from there, not from frame 0
         for t in range(i, j):
             p = poses[t]
@@ -535,6 +539,8 @@ def eye_anchor(poses, boundaries, eyes, max_gap=0.75):
                 ts.append(0); cx_.append(0.0); cy_.append(0.0)
                 continue
             e = near(eyes.get(t, ()), p.cx + lx - ox * k, p.cy + ly - oy * k, p.w, max_gap)
+            if t in eyes:
+                samples.append((t, e is not None))
             if e is not None:
                 lx, ly = e[1] + ox * k - p.cx, e[2] + oy * k - p.cy
                 ts.append(t); cx_.append(lx); cy_.append(ly)
@@ -544,5 +550,18 @@ def eye_anchor(poses, boundaries, eyes, max_gap=0.75):
             for t in range(i, j):
                 p = poses[t]
                 out[t] = Pose(p.cx + float(fx[t - i]), p.cy + float(fy[t - i]), p.w, p.r)
+        if hide_lost:
+            m = 0
+            while m < len(samples):
+                if samples[m][1]:
+                    m += 1
+                    continue
+                e_ = m
+                while e_ < len(samples) and not samples[e_][1]:
+                    e_ += 1
+                if e_ - m >= lost_after:
+                    for t in range(samples[m][0], samples[e_][0] if e_ < len(samples) else j):
+                        out[t] = None
+                m = e_
         i = j
     return out

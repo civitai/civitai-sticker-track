@@ -283,6 +283,8 @@ def _eye_lines(sam3, eyes_cond, images, poses, tgt, view, fps, size=504):
             a = tracking.eye_line(eyes, poses[t]) if t else None
             if a is not None:
                 lines[t] = a
+        else:
+            eye_pts[t] = []
     return lines, eye_pts
 
 
@@ -312,6 +314,7 @@ class StickerTrack:
             "occluded_below": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip": "Share of the points under the sticker that must stay visible."}),
             "occluded_frames": ("INT", {"default": 2, "min": 1, "max": 60, "tooltip": "Consecutive frames below that share before the sticker hides."}),
             "anchor_eyes": ("BOOLEAN", {"default": True, "tooltip": "A sticker placed on an eye follows that eye's detection (needs eyes), not only the head."}),
+            "hide_when_eye_lost": ("BOOLEAN", {"default": False, "tooltip": "A sticker placed on an eye hides while that eye is not found (2+ eye samples in a row, about 1 s) and comes back when it is. No effect on a sticker that is not on an eye."}),
         }}
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -320,7 +323,7 @@ class StickerTrack:
     CATEGORY = "civitai/sticker"
 
     def track(self, images, track_data, sam3, tapnext, placement, fps, tick_ms, points_per_side, cut_threshold, reid_threshold, eyes=None,
-              reid=True, hide_occluded=False, occluded_below=0.25, occluded_frames=2, anchor_eyes=True):
+              reid=True, hide_occluded=False, occluded_below=0.25, occluded_frames=2, anchor_eyes=True, hide_when_eye_lost=False):
         from comfy.ldm.sam3.tracker import unpack_masks
 
         t_start = time.perf_counter()
@@ -365,7 +368,7 @@ class StickerTrack:
             lines, eye_pts = _eye_lines(sam3, eyes, images, poses, tgt, view, fps)
             poses = tracking.snap_rotation(poses, boundaries, lines)
             if anchor_eyes:
-                poses = tracking.eye_anchor(poses, boundaries, eye_pts)
+                poses = tracking.eye_anchor(poses, boundaries, eye_pts, hide_lost=hide_when_eye_lost)
         t_eyes = time.perf_counter() - t_eyes
         smoothed = tracking.smooth(poses, boundaries, fps)
         track = tracking.encode_v1(smoothed, H, W, fps, tick_ms)
