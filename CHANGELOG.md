@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.0]
 
 - StickerAnchorPick: a sticker whose centre is on the `fallback_masks` object follows that object even right beside a head (a hammer, a ball), instead of the head. A head still wins when the centre is on it, or when the point mask is background (a quarter of the frame or touching two edges), mostly inside a head, or holds most of one.
 - StickerAnchorPick: optional `worn_masks` (e.g. SAM3 Detect "hat:4"). A sticker on a worn thing follows the nearest head, as before.
